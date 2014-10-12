@@ -8,11 +8,6 @@ Adafruit_DCMotor *motor = MS.getMotor(1);
 const unsigned short ENCODER_TICKS = 40; // number of ticks in one revolution of the encoder
 const unsigned short DEGREES_TICK = 360 / ENCODER_TICKS;
 
-// actual P, I, and D values for the PID controller
-double p;
-double i;
-double d;
-
 // PID gains
 static double kp = 0.5;
 static double ki = 0.5;
@@ -27,7 +22,8 @@ volatile unsigned long prevTime = 0;
 volatile byte timeIndex = 0; // where to insert into the tickTimes array
 
 // other
-boolean LED = false;
+boolean LED = true;
+float error_sum = 0; // used for the I component of PID
 
 void setup() {
   Serial.begin(9600);
@@ -45,6 +41,9 @@ void setup() {
 }
 
 void loop() {
+  float error = objective - getPosition();
+  float speed = PID(error);
+  // now scale to [0-255]
   //motor->setSpeed(something);
 }
 
@@ -66,7 +65,7 @@ void readEncoder() {
   ticks = (ticks+1) % ENCODER_TICKS; // basically position
   
   // for debugging:
-  digitalWrite(13, !LED);
+  digitalWrite(13, LED);
   LED = !LED;
   
 //  Serial.print("Position: ");
@@ -85,9 +84,19 @@ void readEncoder() {
 }
 
 double getVelocity() {
-  return timeSum / 5; // average velocity over past 5 readings
+  return DEGREES_TICK / 1000*(timeSum / 5); // average velocity over past 5 readings, in deg/s
 }
 
 double getPosition() {
   return ticks * DEGREES_TICK; // what angle we're at, more or less
+}
+
+float PID(float error) {
+  error_sum += error_sum; // accumulate error for the I term
+  
+  float P = kp * error; // error in degrees
+  float I = ki * error_sum; // error_sum in degrees
+  float D = kd * getVelocity(); // velocity in deg/s
+  
+  return P+I+D;
 }
