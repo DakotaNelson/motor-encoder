@@ -9,21 +9,25 @@ const unsigned short ENCODER_TICKS = 40; // number of ticks in one revolution of
 const unsigned short DEGREES_TICK = 360 / ENCODER_TICKS;
 
 // PID gains
-static double kp = 0.5;
-static double ki = 0.5;
-static double kd = 0.5;
+static double kp = 2.5;
+static double ki = 1;
+//static double kd = 0.5;
 
 // starting position of the motor
-volatile byte ticks = 0; // ticks of the encoder - essentially position
+volatile byte ticks = 20; // ticks of the encoder - essentially position
 volatile unsigned long timeSum = 0; // Sum of the velocity queue. One less floating pont operation in the interrupt.
 volatile unsigned long tickTimes[5] = {0,0,0,0,0}; // time delta between ticks - used for velocity calculations
 volatile unsigned long prevTime = 0;
 // 5 elements so that we have an average
 volatile byte timeIndex = 0; // where to insert into the tickTimes array
+volatile bool direction = true; // true = forward, false = backward
 
 // other
 boolean LED = true;
+
+// for the PID controller
 float error_sum = 0; // used for the I component of PID
+unsigned long time;
 
 void setup() {
   Serial.begin(9600);
@@ -34,17 +38,29 @@ void setup() {
   attachInterrupt(0,readEncoder, CHANGE); // attaches to pin 2
   
   MS.begin();
+  //motor->setSpeed(255);
+  //motor->run(FORWARD);
+  delay(1000);
+  //motor->setSpeed(0);
   
-  delay(5000);
-  motor->setSpeed(110);
-  motor->run(FORWARD);
+  time = millis();
 }
 
 void loop() {
-  float error = objective - getPosition();
-  float speed = PID(error);
-  // now scale to [0-255]
-  //motor->setSpeed(something);
+  float objective = 90;
+
+  float position = getPosition();
+  float error = objective - position;
+  
+  Serial.print("Position: ");
+  Serial.println(position);
+  Serial.print("Error: ");
+  Serial.println(error);
+  
+  float speed = PID(error, millis() - time);
+  time = millis(); // update the previous time
+  
+  setSpeed(speed);
 }
 
 void readEncoder() {
@@ -62,14 +78,18 @@ void readEncoder() {
   prevTime = time;
   timeIndex = (timeIndex+1) % 5; // move up where to insert into the array
   
-  ticks = (ticks+1) % ENCODER_TICKS; // basically position
+  if(direction) {
+    ticks = (ticks+1) % ENCODER_TICKS; // basically position
+  } else {
+    ticks = (ticks-1) % ENCODER_TICKS; // going backward
+  }
   
   // for debugging:
   digitalWrite(13, LED);
   LED = !LED;
   
-//  Serial.print("Position: ");
-//  Serial.println(ticks);
+  //Serial.print("Pos: ");
+  //Serial.println(ticks);
 //  Serial.print("Array: ");
 //  Serial.print(tickTimes[0]);
 //  Serial.print(",");
@@ -91,12 +111,40 @@ double getPosition() {
   return ticks * DEGREES_TICK; // what angle we're at, more or less
 }
 
-float PID(float error) {
-  error_sum += error_sum; // accumulate error for the I term
+float PID(float error, unsigned long timeDelta) {
+  error_sum += error * (float(timeDelta)/1000); // accumulate error for the I term
   
   float P = kp * error; // error in degrees
   float I = ki * error_sum; // error_sum in degrees
-  float D = kd * getVelocity(); // velocity in deg/s
+  //float D = kd * getVelocity(); // velocity in deg/s
+  Serial.println("PI:");
+  Serial.println(P);
+  Serial.println(I);
   
-  return P+I+D;
+  error_sum *= 0.9; // error sum should decay over time
+  return P+I; //+D;
+}
+
+void setSpeed(float speed) {
+  // now scale to [0-255]
+  if(speed > 0) {
+    motor->run(FORWARD);
+    direction = true;
+  } else {
+    motor->run(BACKWARD);
+    direction = false;
+  }
+  
+  speed = abs(speed);
+  
+  //if(speed < 80) {
+  //  speed = 80;
+  //}
+  if(speed > 255) {
+    speed = 255;
+  }
+  
+  Serial.print("Setting speed: ");
+  Serial.println(int(speed));
+  motor->setSpeed(int(speed));
 }
